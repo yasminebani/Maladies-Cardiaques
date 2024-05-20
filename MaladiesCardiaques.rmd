@@ -1,0 +1,671 @@
+---
+title: "maladies cardiaques"
+author: "yasmine bani"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+
+
+```{r}
+library(stats)
+library(readr)
+library(tidymodels)
+
+data <- read.csv("HeartDisease_version.csv")
+head(data, 10)
+
+```
+
+```{r}
+str(data)
+```
+
+
+```{r}
+missing_values <- sum(is.na(data))
+missing_values
+```
+Let's take a look on how our missing values are distributed
+```{r}
+for (variable in names(data)) {
+  count_na <- sum(is.na(data[[variable]]))
+  print(paste(variable, ": ", count_na, " valeurs manquantes"))
+}
+
+```
+
+While going through our data we noticed that in our categorical features our missing values are interpreted as an empty space not as NA, so we decided to turn the empty to NA and check again for missing values
+
+```{r}
+# Replace empty spaces with NA
+data$TypeDouleurThoracique[data$TypeDouleurThoracique == ""] <- NA
+
+# Check unique values again to confirm
+unique(data$TypeDouleurThoracique)
+```
+
+```{r}
+data$Sexe[data$Sexe == ""] <- NA
+
+unique(data$Sexe)
+```
+```{r}
+data$ECGRepos[data$ECGRepos == ""] <- NA
+
+unique(data$ECGRepos)
+```
+
+
+```{r}
+data$AngineExercice[data$AngineExercice == ""] <- NA
+
+unique(data$AngineExercice)
+```
+
+
+```{r}
+data$PenteSTExercice[data$PenteSTExercice == ""] <- NA
+
+unique(data$PenteSTExercice)
+```
+
+
+```{r}
+missing_values <- sum(is.na(data))
+missing_values
+```
+```{r}
+for (variable in names(data)) {
+  count_na <- sum(is.na(data[[variable]]))
+  print(paste(variable, ": ", count_na, " valeurs manquantes"))
+}
+```
+
+
+```{r}
+taux = missing_values/prod(dim(data))*100
+taux
+```
+
+```{r}
+library(mice)
+
+md.pattern(data,rotate.names = TRUE)
+```
+We don't have a big portion of missing data so we're just gonna drop these missing values from our dataset.
+
+We're also going to remove all rows with 0 as a Cholesterol value. It's neither logical nor achievable as a human being.
+
+
+
+```{r}
+NAdropped <- na.omit(data)
+missing_values <- sum(is.na(NAdropped))
+missing_values
+```
+```{r}
+NAdropped <- NAdropped %>%
+  filter(Cholesterol > 0)
+```
+
+
+```{r}
+for (variable in names(NAdropped)) {
+  count_na <- sum(is.na(NAdropped[[variable]]))
+  print(paste(variable, ": ", count_na, " valeurs manquantes"))
+}
+
+
+```
+
+```{r}
+notEncodedData <- NAdropped
+notEncodedData
+```
+
+
+We will now proceed to encoding our categorical features.
+
+
+
+```{r}
+# Codage de la variable Sexe
+NAdropped$Sexe <- ifelse(NAdropped$Sexe == "M", 1, 2)
+# Codage de la variable AngineExercice
+NAdropped$AngineExercice <- ifelse(NAdropped$AngineExercice == "N", 0, 1)
+# Codage de la variable PenteSTExercice
+NAdropped$PenteSTExercice <- ifelse(NAdropped$PenteSTExercice == "Up", 1, ifelse(NAdropped$PenteSTExercice == "Flat", 0, 2))
+# Codage de la variable ECGRepos
+NAdropped$ECGRepos <- ifelse(NAdropped$ECGRepos == "Normal", 0, ifelse(NAdropped$ECGRepos == "LVH", 1, 2))
+# Codage de la variable TypeDouleurThoracique
+NAdropped$TypeDouleurThoracique <- ifelse(NAdropped$TypeDouleurThoracique == "TA", 0,
+                                   ifelse(NAdropped$TypeDouleurThoracique == "ATA", 1,
+                                          ifelse(NAdropped$TypeDouleurThoracique == "NAP", 2, 3)))
+
+```
+
+
+
+### Extraction des valeurs aberrantes
+
+```{r}
+library(reshape2)
+
+data_melted <- melt(NAdropped)
+ggplot(data_melted, aes(x = variable, y = value)) +
+  geom_boxplot(fill = "lightblue") +
+  coord_cartesian( ylim = c(-3, 4), xlim=c(1,12)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "Boxplots for All Variables", x = "Variable", y = "Value")
+```
+
+```{r}
+# Function to replace outliers with the median
+replace_outliers_with_median <- function(x) {
+  Q1 <- quantile(x, 0.25)
+  Q3 <- quantile(x, 0.75)
+  IQR_val <- Q3 - Q1
+  lower_bound <- Q1 - 1.5 * IQR_val
+  upper_bound <- Q3 + 1.5 * IQR_val
+  x[which(x < lower_bound | x > upper_bound)] <- median(x, na.rm = TRUE)
+  return(x)
+}
+
+# Apply the function to each numeric column
+numeric_cols <- sapply(NAdropped, is.numeric)
+
+for (col in colnames(df)[numeric_cols]) {
+  NAdropped[[col]] <- replace_outliers_with_median(NAdropped[[col]])
+}
+
+# Print the data frame with outliers replaced by the median
+print(NAdropped)
+```
+
+
+
+
+```{r}
+df_standardise <- scale(NAdropped)
+
+```
+
+
+Univariate Analysis
+```{r}
+for (col in names(NAdropped)) {
+  # Statistiques descriptives
+  summary_stats <- summary(NAdropped[[col]])
+  cat("\nVariable:", col, "\n")
+  print(summary_stats)
+} 
+```
+
+
+
+```{r}
+par(mfrow=c(1,2))
+for (col in names(NAdropped)) {
+    if (is.numeric(NAdropped[[col]])) {
+    # Histogramme pour les variables numériques
+    hist(NAdropped[[col]], main = paste("Histogramme de", col), xlab = col, col = "lightblue", border = "black")
+  } else {
+    # Diagramme à barres pour les variables catégorielles
+    barplot(table(NAdropped[[col]]), main = paste("Diagramme à barres de", col), xlab = col, col = "lightblue", border = "black")
+  }
+}
+```
+On remarque que les données ne sont pas symétriques, on n’a pas la normalité de tous les échantillons. 
+On va la confirmer avec un test de Shapiro pour quelques échantillons.
+
+
+```{r}
+# test de normalité de Shapiro-Wilk sur la variable Cholesterol
+shapiro.test(NAdropped$Cholesterol) 
+```
+p-value < 2.2e-16 < 0.05 Donc la variable 'cholesterol' ne suit pas la loi normale
+
+```{r}
+shapiro.test(NAdropped$Age) 
+```
+Plotting the relationships between our different variables with MaladieCardiaque
+
+```{r}
+library(dplyr)
+
+ggplot(NAdropped, aes(x = MaladieCardiaque, fill = TypeDouleurThoracique)) +
+  geom_bar(position = "dodge", stat = "count") +
+  labs(title = "Relation entre MaladieCardiaque et TypeDouleurThoracique", x = "MaladieCardiaque", y = "Count")
+
+
+
+NAdropped$ECGRepos <- as.factor(NAdropped$ECGRepos)
+ggplot(NAdropped, aes(x = MaladieCardiaque, fill = ECGRepos)) +
+  geom_bar(position = "dodge", stat = "count") +
+  labs(title = "Relation entre MaladieCardiaque et ECGRepos", x = "MaladieCardiaque", y = "Count")
+
+NAdropped$AngineExercice <- as.factor(NAdropped$AngineExercice)
+ggplot(NAdropped, aes(x = MaladieCardiaque, fill = AngineExercice)) +
+  geom_bar(position = "dodge", stat = "count") +
+  labs(title = "Relation entre MaladieCardiaque et AngineExercice", x = "MaladieCardiaque", y = "Count")
+
+NAdropped$Sexe <- as.factor(NAdropped$Sexe)
+ggplot(NAdropped, aes(x = MaladieCardiaque, fill = Sexe)) +
+  geom_bar(position = "dodge", stat = "count") +
+  labs(title = "Relation entre MaladieCardiaque et le Sexe", x = "MaladieCardiaque", y = "Count")
+
+
+NAdropped$PenteSTExercice <- as.factor(NAdropped$PenteSTExercice)
+ggplot(NAdropped, aes(x = MaladieCardiaque, fill = PenteSTExercice)) +
+  geom_bar(position = "dodge", stat = "count") +
+  labs(title = "Relation entre MaladieCardiaque et PenteSTExercice", x = "MaladieCardiaque", y = "Count")
+
+
+```
+Bivariate Analysis : 
+
+In this part of our notebook we are going to study the relationship between our different variables and our target variable MaladieCardiaque.
+
+
+```{r}
+NAdropped$MaladieCardiaque <- as.numeric(NAdropped$MaladieCardiaque)
+
+for (col in names(NAdropped)) {
+  NAdropped[[col]] <- as.numeric(NAdropped[[col]])
+  if (col != "MaladieCardiaque") {
+    cor_test_result <- cor.test(NAdropped[[col]], NAdropped$MaladieCardiaque)
+      
+      cat(paste("Correlation test between", col, "and MaladieCardiaque:\n"))
+      print(cor_test_result)
+      cat("\n")
+  }
+}
+```
+
+#### Régression Lineaire
+#### Simple
+
+
+
+```{r}
+
+library(ggplot2)
+
+# Tracer le nuage de points et la droite de régression
+plot(NAdropped$Age, NAdropped$Cholesterol, main = "Régression Linéaire Simple", 
+     xlab = "Age", ylab = "Cholestérol", pch = 16, col = "blue")
+
+abline(lm(Cholesterol ~ Age, data = NAdropped), col = "red")
+```
+
+```{r}
+# Afficher les coefficients de la régression
+modele <- lm(Cholesterol ~ Age, data = NAdropped)
+print(coef(modele))
+```
+```{r}
+summary(modele)
+```
+##On a  R2=0.002642, alors on peut conclure que 0.2% de la variablilité de Cholesterol est
+#expliquée par la variable 'Age' =⇒ ce modèle n'est pas un bon modèle.
+
+```{r}
+residus <- resid(modele)
+# Tracer un graphique des résidus
+plot(NAdropped$Age, residus, main = "Graphique des Résidus", 
+     xlab = "Age", ylab = "Résidus", pch = 16, col = "green")
+# Afficher un histogramme des résidus
+hist(residus, main = "Histogramme des Résidus", xlab = "Résidus", col = "lightblue", border = "black")
+# Afficher un QQ-plot des résidus
+qqnorm(residus, main = "QQ-Plot des Résidus", col = "purple")
+qqline(residus, col = "red")
+```
+# Regression lineaire multiple
+
+```{r}
+modele_reg <- lm(Cholesterol ~ Age + Sexe + TensionArterielleRepos, data = NAdropped)
+summary(modele_reg)
+```
+##On a  R2=0.0187, alors on peut conclure que 1% de la variablilité de Cholesterol est
+#expliquée par les autres variables =⇒ ce modèle n'est pas un bon modèle.
+
+
+```{r}
+# Tracer les points du modèle par rapport aux valeurs observées
+plot(NAdropped$Cholesterol, fitted(modele_reg), main = "Points du Modèle vs Observations",
+     xlab = "Cholestérol Observé", ylab = "Cholestérol Prédit", pch = 16, col = "blue")
+# Ajouter une ligne diagonale pour une comparaison visuelle
+abline(0, 1, col = "red")
+```
+```{r}
+# Representation graphique des residus
+R=resid(modele_reg)
+plot(R)
+```
+
+
+```{r}
+#Tester la normalité des résidus.
+qqnorm(R);qqline(R)
+```
+```{r}
+modele_reg2 <- lm(Cholesterol ~ FrequenceCardiaqueMax + TypeDouleurThoracique + DepressionAncienne, data = NAdropped)
+summary(modele_reg2)
+```
+```{r}
+# Tracer les points du modèle par rapport aux valeurs observées
+plot(NAdropped$Cholesterol, fitted(modele_reg2), main = "Points du Modèle vs Observations",
+     xlab = "Cholestérol Observé", ylab = "Cholestérol Prédit", pch = 16, col = "blue")
+# Ajouter une ligne diagonale pour une comparaison visuelle
+abline(0, 1, col = "red")
+```
+```{r}
+R2=resid(modele_reg2)
+plot(R2)
+```
+```{r}
+#Tester la normalité des résidus.
+qqnorm(R2);qqline(R2)
+```
+```{r}
+modele_reg3 <- lm(Cholesterol ~ Age+Sexe+TypeDouleurThoracique+
+                              TensionArterielleRepos+GlycemieJeune+
+                              ECGRepos+FrequenceCardiaqueMax+
+                              AngineExercice+DepressionAncienne+
+                              PenteSTExercice+MaladieCardiaque, data = NAdropped)
+```
+
+```{r}
+summary(modele_reg3)
+```
+##Cette valeur indique que le modèle explique environ 4.5% de la variance totale du cholestérol en fonction des variables indépendantes
+
+```{r}
+plot(NAdropped$Cholesterol, fitted(modele_reg3), main = "Points du Modèle vs Observations",
+     xlab = "Cholestérol Observé", ylab = "Cholestérol Prédit", pch = 16, col = "blue")
+# Ajouter une ligne diagonale pour une comparaison visuelle
+abline(0, 1, col = "red")
+```
+
+
+```{r}
+AIC(modele_reg) 
+AIC(modele_reg2)
+AIC(modele_reg3)
+```
+##On peut remarquer que l’AIC3 <AIC1<AIC2  alors le modele 3 est meilleur que les autres 2 modèles
+
+```{r}
+library(readr)
+library(tidymodels)
+```
+
+Part II.
+
+Our features don't follow a normal distribution so We are not able to perform the ANOVA test. 
+However, as alternatives we have the non parametric tests Mann Whitney U test and kruskall Wallis test for features with more than 2 modalities
+
+
+```{r}
+
+NAdropped$MaladieCardiaque <- as.factor(NAdropped$MaladieCardiaque)
+
+for (var in names(NAdropped)) {
+  if((length(unique(NAdropped[[var]])) <= 2) ){
+    NAdropped[[col]] <- as.numeric(NAdropped[[col]])
+      u_test_result <- wilcox.test(NAdropped[[var]],NAdropped$MaladieCardiaque)
+  
+    cat(paste("Mann-Whitney U test for", var, ":\n"))
+    print(u_test_result)
+    cat("\n")
+  }
+
+}
+
+```
+
+
+
+
+```{r}
+
+test_result <- kruskal.test(notEncodedData$TypeDouleurThoracique, notEncodedData$MaladieCardiaque)
+
+cat(paste("Kruskall Wallis test for TypeDouleurThoracique :\n"))
+print(test_result)
+```
+```{r}
+test_result <- kruskal.test(notEncodedData$ECGRepos, notEncodedData$MaladieCardiaque)
+
+cat(paste("Kruskall Wallis test for ECGRepos :\n"))
+print(test_result)
+```
+p-value > 0.05 => on accepte H0: les echantillons sont homogene donc il existe pas un effet.
+
+
+```{r}
+test_result <- kruskal.test(notEncodedData$PenteSTExercice, notEncodedData$MaladieCardiaque)
+
+cat(paste("Kruskall Wallis test for PenteSTExercice :\n"))
+print(test_result)
+```
+
+
+```{r}
+NAdropped$MaladieCardiaque = as.factor(NAdropped$MaladieCardiaque)
+
+set.seed(421)
+split <- initial_split(NAdropped, prop = 0.8, strata = MaladieCardiaque)
+train <- split %>% 
+         training()
+test <- split %>% 
+        testing()
+```
+
+
+
+
+```{r}
+model <- logistic_reg(mixture = double(1), penalty = double(1)) %>%
+  set_engine("glmnet") %>%
+  set_mode("classification") %>%
+  fit(MaladieCardiaque ~ ., data = train)
+```
+
+
+```{r}
+tidy(model)
+```
+
+```{r}
+coeff <- tidy(log_reg_final) %>% 
+  arrange(desc(abs(estimate))) %>% 
+  filter(abs(estimate) > 0.5)
+ggplot(coeff, aes(x = term, y = estimate, fill = term)) + geom_col() + coord_flip()
+```
+
+
+```{r}
+# Class Predictions
+pred_class <- predict(model,
+                      new_data = test,
+                      type = "class")
+pred_class
+```
+
+```{r}
+pred_proba <- predict(model,
+                      new_data = test,
+                      type = "prob")
+pred_proba
+```
+
+
+
+
+```{r}
+results <- test %>%
+           select(MaladieCardiaque) %>%
+           bind_cols(pred_class, pred_proba)
+
+accuracy(results, truth = MaladieCardiaque, estimate = .pred_class)
+```
+
+
+We've got an accuracy of 83% 
+Let's try some hyperparameter tunning to see if we can get a better model without falling into overfitting
+
+```{r}
+# Define the logistic regression model with penalty and mixture hyperparameters
+log_reg <- logistic_reg(mixture = tune(), penalty = tune(), engine = "glmnet")
+
+# Define the grid search for the hyperparameters
+grid <- grid_regular(mixture(), penalty(), levels = c(mixture = 4, penalty = 3))
+
+# Define the workflow for the model
+log_reg_wf <- workflow() %>%
+  add_model(log_reg) %>%
+  add_formula(MaladieCardiaque ~ .)
+
+# Define the resampling method for the grid search
+folds <- vfold_cv(train, v = 5)
+
+# Tune the hyperparameters using the grid search
+log_reg_tuned <- tune_grid(
+  log_reg_wf,
+  resamples = folds,
+  grid = grid,
+  control = control_grid(save_pred = TRUE)
+)
+
+select_best(log_reg_tuned, metric = "roc_auc")
+```
+```{r}
+# Fit the model using the optimal hyperparameters
+log_reg_final <- logistic_reg(penalty = 0.0000000001, mixture = 0.3333333) %>%
+                 set_engine("glmnet") %>%
+                 set_mode("classification") %>%
+                 fit(MaladieCardiaque~., data = train)
+
+# Evaluate the model performance on the testing set
+pred_class <- predict(log_reg_final,
+                      new_data = test,
+                      type = "class")
+results <- test %>%
+  select(MaladieCardiaque) %>%
+  bind_cols(pred_class, pred_proba)
+
+# Create confusion matrix
+conf_mat(results, truth = MaladieCardiaque,
+         estimate = .pred_class)
+```
+```{r}
+precision(results, truth = MaladieCardiaque,
+          estimate = .pred_class)
+```
+
+
+```{r}
+recall(results, truth = MaladieCardiaque,
+          estimate = .pred_class)
+```
+
+```{r}
+results <- test %>%
+           select(MaladieCardiaque) %>%
+           bind_cols(pred_class, pred_proba)
+
+accuracy(results, truth = MaladieCardiaque, estimate = .pred_class)
+```
+
+
+### Analyse de variance (PCA)
+
+```{r}
+advancedM <- NAdropped
+
+numeric_data <- advancedM[, sapply(advancedM, is.numeric)]
+
+# Perform PCA on the numeric data
+pca <- prcomp(numeric_data)
+
+pca
+```
+
+```{r}
+var <- pca$sdev^2/sum(pca$sdev^2)
+var <- var[1:5]
+var
+```
+proportions de variance expliqu?e par les cinq premi?res pca
+ 
+```{r}
+# histogram with added parameters
+barplot(var,
+        names.arg =c(1,2,3,4,5), 
+        density = 10,
+        xlab='Dimensions', 
+        ylab ='Variance', 
+        main='Added Variance With Each Dimenions', 
+        col = "red")
+```
+
+```{r}
+library(ggplot2)
+library(ggfortify)
+autoplot(pca, data = advancedM)
+```
+
+
+
+Modélistaion Avancée
+
+```{r}
+advancedM$MaladieCardiaque = as.factor(advancedM$MaladieCardiaque)
+
+set.seed(421)
+trainIndex <- initial_split(advancedM, prop = 0.7, strata = MaladieCardiaque)
+trainData <- trainIndex %>% 
+         training()
+testData <- trainIndex %>% 
+        testing()
+
+```
+
+
+```{r}
+library(MASS)
+
+lda_model <- lda(trainData$MaladieCardiaque ~ ., data=trainData)
+```
+
+
+```{r}
+lda_predictions <- predict(lda_model, testData,  type = "response")
+```
+
+
+
+```{r}
+pred_values <- factor(lda_predictions$class)
+actual_values<- factor(testData$MaladieCardiaque)
+
+cf <- caret::confusionMatrix(data=pred_values,
+                     reference=actual_values)
+
+fourfoldplot(as.table(cf),color=c("red","green"),main = "Confusion Matrix")
+
+```
+
+
+
+```{r}
+ldahist(data = lda_predictions$x[,1], g = testData$MaladieCardiaque)
+```
